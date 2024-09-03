@@ -1,7 +1,8 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from enum import Enum
 from distutils.util import strtobool
-from chunk_based_metrics import ChunkAnalysis, split_into_chunks, calculate_utilization_score
+from chunk_based_metrics import ChunkAnalysis, split_into_chunks
+from text_based_calculations import calculate_sbert_similarity
 from pydantic import BaseModel
 from loguru import logger
 import dspy
@@ -17,45 +18,43 @@ class EvaluationMetric(str, Enum):
 
 class MetricDescription(str, Enum):
     CONTEXT_ADHERENCE_DESC = (
-        "Task: Evaluate if the answer strictly uses only the information provided in the context.\n"
+        "Task: Evaluate if the answer strictly uses only the information provided in the context (precision).\n"
         "Steps:\n"
         "1. Carefully read the context and the answer.\n"
         "2. Identify any information in the answer that is not present in the context.\n"
         "3. If the answer contains only information from the context, evaluate as 'passed'.\n"
         "4. If the answer includes any information not in the context, evaluate as 'failed'.\n"
+        "Note: This metric measures closed-domain hallucinations. A score of 1 or close to 1 indicates high adherence to the context.\n"
     )
+
     CORRECTNESS_DESC = (
-        "Task: Assess the factual accuracy of the answer based on the given context.\n"
+        "Task: Assess the factual accuracy of the answer based on the domain expert answer provided.\n"
         "Steps:\n"
-        "1. Compare each statement in the answer to the information in the context.\n"
-        "2. Check for any factual errors or contradictions between the answer and the context.\n"
-        "3. If all statements in the answer are factually correct, evaluate as 'passed'.\n"
-        "4. If any statement is incorrect or contradicts the context, evaluate as 'failed'.\n"
+        "1. Compare each statement in the answer to the information in the expert answer.\n"
+        "2. Check for any factual errors or contradictions between the model answer and the expert answer.\n"
+        "3. If all statements in the answer are factually correct and align with the expert answer, evaluate as 'passed'.\n"
+        "4. If any statement is incorrect or contradicts the expert answer, evaluate as 'failed'.\n"
     )
+
     COMPLETENESS_DESC = (
-        "Task: Determine if the answer fully addresses all aspects of the user's question using the context provided.\n"
+        "Task: Determine if the answer fully addresses all aspects of the user's question using the context provided, focusing on recall of relevant information.\n"
         "Steps:\n"
         "1. Identify all parts of the user's question.\n"
         "2. Check if the answer addresses each part of the question.\n"
-        "3. Verify that all relevant information from the context is included in the answer.\n"
-        "4. If the answer covers all parts of the question and includes all relevant context, evaluate as 'passed'.\n"
-        "5. If any part of the question is unanswered or relevant context is missing, evaluate as 'failed'.\n"
+        "3. Verify that all relevant information from the context is included in the answer, even if not explicitly asked for in the question.\n"
+        "4. Assess whether the response fully reflects the relevant information available in the context.\n"
+        "5. If the answer covers all parts of the question, includes all relevant context, and doesn't omit important information, evaluate as 'passed'.\n"
+        "6. If any part of the question is unanswered, relevant context is missing, or important information is omitted, evaluate as 'failed'.\n"
+        "Note: This metric complements Context Adherence. While Context Adherence focuses on precision, Completeness focuses on recall.\n"
     )
     INSTRUCTION_ADHERENCE_DESC = (
-        "Task: Evaluate if the answer follows the specific instructions or requirements in the user's question.\n"
+        "Task: Evaluate if the answer follows the specific instructions or requirements in the user's question or system prompt.\n"
         "Steps:\n"
-        "1. Identify any specific instructions or requirements in the user's question.\n"
+        "1. Identify any specific instructions or requirements in the user's question or system prompt.\n"
         "2. Check if the answer addresses these specific instructions or requirements.\n"
         "3. If the answer follows all instructions and meets all requirements, evaluate as 'passed'.\n"
         "4. If the answer fails to follow any instruction or meet any requirement, evaluate as 'failed'.\n"
-    )
-    CONTEXT_RELEVANCE_DESC = (
-        "Task: Assess how relevant the provided context is to the user's question.\n"
-        "Steps:\n"
-        "1. Analyze the user's question and identify its key components.\n"
-        "2. Examine the context and determine if it contains information related to these key components.\n"
-        "3. If the context provides relevant information for answering the question, evaluate as 'passed'.\n"
-        "4. If the context is unrelated or only tangentially related to the question, evaluate as 'failed'.\n"
+        "Note: This metric helps uncover hallucinations where the model is ignoring instructions. A high score (close to 1) indicates the model likely followed its instructions.\n"
     )
 
 
@@ -64,8 +63,34 @@ class MetricDetails(BaseModel):
     description: MetricDescription
 
 
+class RAGEvaluatorWithHumanAnswer(dspy.Signature):
+    """Signature for the RAG evaluator."""
+    user_question: str = dspy.InputField(desc="The question entered by the user.")
+    context: List[str] = dspy.InputField(
+        desc="The chunks of text retrieved by the search engine related to the user's question.")
+    answer: str = dspy.InputField(
+        desc="The response generated by the model based on the user's question and the provided context.")
+    metric: MetricDetails = dspy.InputField(desc="The specific aspect of the response being evaluated.")
+    human_answer: str = dspy.InputField(desc="A human answer provided by a domain expert in the field.")
+    evaluation_result: str = dspy.OutputField(
+        desc="The outcome of the evaluation process, did the response meet the criteria for the selected metric? output a final result ('failed' or 'passed').")
+
+
 class RAGEvaluator(dspy.Signature):
     """Signature for the RAG evaluator."""
+    user_question: str = dspy.InputField(desc="The question entered by the user.")
+    context: List[str] = dspy.InputField(
+        desc="The chunks of text retrieved by the search engine related to the user's question.")
+    answer: str = dspy.InputField(
+        desc="The response generated by the model based on the user's question and the provided context.")
+    metric: MetricDetails = dspy.InputField(desc="The specific aspect of the response being evaluated.")
+    evaluation_result: str = dspy.OutputField(
+        desc="The outcome of the evaluation process, did the response meet the criteria for the selected metric? output a final result ('failed' or 'passed').")
+
+
+class RAGEvaluatorWithSystemPrompt(dspy.Signature):
+    """Signature for the RAG evaluator."""
+    system_prompt: str = dspy.InputField(desc="The system prompt assigned to the model.")
     user_question: str = dspy.InputField(desc="The question entered by the user.")
     context: List[str] = dspy.InputField(
         desc="The chunks of text retrieved by the search engine related to the user's question.")
@@ -89,21 +114,42 @@ class RAGEval(dspy.Module):
     def __init__(self):
         super().__init__()
         self.generate_eval = dspy.TypedChainOfThought(RAGEvaluator)
+        self.generate_eval_with_human_answer = dspy.TypedChainOfThought(RAGEvaluatorWithHumanAnswer)
+        self.generate_eval_with_system_prompt = dspy.TypedChainOfThought(RAGEvaluatorWithSystemPrompt)
         self.generate_chunk_level_eval = dspy.TypedChainOfThought(ChunkAnalysis)
         self.format_eval = dspy.ChainOfThought(EvalParser)
 
-    def forward(self, user_question: str, context: List[str], answer: str, metric: MetricDetails) -> dspy.Prediction:
+    def forward(self, user_question: str, context: List[str], answer: str, metric: MetricDetails,
+                human_answer: Optional[str] = None, system_prompt: Optional[str] = None) -> dspy.Prediction:
         """Perform the forward pass of the RAG evaluation."""
         logger.debug(f"Evaluating metric: {metric.metric}")
 
-        # Generate overall evaluation
-        eval_result = self.generate_eval(
-            user_question=user_question,
-            context=context,
-            answer=answer,
-            metric=metric
-        ).evaluation_result
-        logger.debug(f"Overall evaluation result: {eval_result}")
+        # Choose the appropriate evaluation method based on the metric and available inputs
+        if metric.metric == EvaluationMetric.CORRECTNESS and human_answer:
+            eval_result = self.generate_eval_with_human_answer(
+                user_question=user_question,
+                context=context,
+                answer=answer,
+                metric=metric,
+                human_answer=human_answer
+            ).evaluation_result
+        elif metric.metric == EvaluationMetric.INSTRUCTION_ADHERENCE and system_prompt:
+            eval_result = self.generate_eval_with_system_prompt(
+                system_prompt=system_prompt,
+                user_question=user_question,
+                context=context,
+                answer=answer,
+                metric=metric
+            ).evaluation_result
+        else:
+            eval_result = self.generate_eval(
+                user_question=user_question,
+                context=context,
+                answer=answer,
+                metric=metric
+            ).evaluation_result
+
+        logger.debug(f"Evaluation result: {eval_result}")
 
         # Format the evaluation result
         model = dspy.OpenAI(temperature=0.0)
@@ -173,7 +219,7 @@ def evaluate_responses(user_question: str, context: str, answer: str, metrics: L
     # Calculate attribution scores for chunks with high attribution
     attributed_chunk_utilization_dict = {}
     for chunk in majority_attributed_chunks:
-        chunk_utilization_score = calculate_utilization_score(chunk, answer)
+        chunk_utilization_score = calculate_sbert_similarity(chunk, answer)
         attributed_chunk_utilization_dict[chunk] = chunk_utilization_score
         logger.debug(f"Chunk: '{chunk}...' - Utilization Score: {chunk_utilization_score:.4f}")
 

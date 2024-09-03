@@ -6,6 +6,7 @@ from collections import Counter
 import math
 from loguru import logger
 from sentence_transformers import SentenceTransformer, util
+import os
 
 # Ensure necessary NLTK data is downloaded
 nltk.download('punkt', quiet=True)
@@ -78,14 +79,12 @@ def calculate_meteor_score(reference: str, hypothesis: str) -> float:
 
 def calculate_sbert_similarity(reference: str, hypothesis: str) -> float:
     """Calculate semantic similarity between reference and hypothesis using SentenceBERT."""
-
-    import os
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Disable parallelism to avoid deadlocks
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     logger.debug(f"Calculating SBERT similarity for texts of lengths {len(reference)} and {len(hypothesis)}")
 
     # Load a pre-trained SentenceBERT model
-    model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+    model = SentenceTransformer('paraphrase-mpnet-base-v2')
 
     # Encode sentences to get their embeddings
     reference_embedding = model.encode(reference, convert_to_tensor=True)
@@ -98,6 +97,7 @@ def calculate_sbert_similarity(reference: str, hypothesis: str) -> float:
     logger.info(f"SBERT similarity calculated: {sbert_score:.4f}")
 
     return sbert_score
+
 
 def calculate_textual_and_semantic_correlation_metrics(reference: str, hypothesis: str) -> Dict[str, float]:
     """Calculate all NLP metrics (BLEU, ROUGE, METEOR, SBERT) for a given reference and hypothesis."""

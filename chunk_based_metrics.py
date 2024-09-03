@@ -1,18 +1,11 @@
 from typing import List
 import dspy
-from difflib import SequenceMatcher
 from langchain.text_splitter import TokenTextSplitter
 
 
 def split_into_chunks(text: str, chunk_size: int) -> List[str]:
     text_splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=0)
     return text_splitter.split_text(text)
-
-
-def calculate_utilization_score(attributed_text: str, model_answer: str) -> float:
-    matcher = SequenceMatcher(None, attributed_text, model_answer)
-    intersection_length = sum(length for _, _, length in matcher.get_matching_blocks())
-    return intersection_length / len(model_answer) if len(model_answer) > 0 else 0.0
 
 
 class ChunkAnalysis(dspy.Signature):
