@@ -57,9 +57,6 @@ class MetricDescription(str, Enum):
         "4. If the answer fails to follow any instruction or meet any requirement, evaluate as 'failed'.\n"
         "Note: This metric helps uncover hallucinations where the model is ignoring instructions. A high score (close to 1) indicates the model likely followed its instructions.\n"
     )
-
-<<<<<<< HEAD
-=======
     CONCISENESS_AND_RELEVANCE_DESC = (
         "Task: Evaluate if the answer includes only information relevant to the question, without adding unnecessary details from the context.\n"
         "Steps:\n"
@@ -72,7 +69,6 @@ class MetricDescription(str, Enum):
         "Note: This metric helps ensure the model's response is focused, on-topic, and concise. A high score (close to 1) indicates the answer is relevant to the question asked without including extraneous information.\n"
     )
 
->>>>>>> a441a20 (added the conciseness and relevance metric)
 
 class MetricDetails(BaseModel):
     metric: EvaluationMetric
@@ -302,8 +298,10 @@ def evaluate_all_metrics(user_question: str, context: str, answer: str, human_an
         MetricDetails(metric=EvaluationMetric.CONTEXT_ADHERENCE, description=MetricDescription.CONTEXT_ADHERENCE_DESC),
         MetricDetails(metric=EvaluationMetric.CORRECTNESS, description=MetricDescription.CORRECTNESS_DESC),
         MetricDetails(metric=EvaluationMetric.COMPLETENESS, description=MetricDescription.COMPLETENESS_DESC),
-        MetricDetails(metric=EvaluationMetric.INSTRUCTION_ADHERENCE, description=MetricDescription.INSTRUCTION_ADHERENCE_DESC),
-        MetricDetails(metric=EvaluationMetric.CONCISENESS_AND_RELEVANCE, description=MetricDescription.CONCISENESS_AND_RELEVANCE_DESC)
+        MetricDetails(metric=EvaluationMetric.INSTRUCTION_ADHERENCE,
+                      description=MetricDescription.INSTRUCTION_ADHERENCE_DESC),
+        MetricDetails(metric=EvaluationMetric.CONCISENESS_AND_RELEVANCE,
+                      description=MetricDescription.CONCISENESS_AND_RELEVANCE_DESC)
     ]
 
     try:
