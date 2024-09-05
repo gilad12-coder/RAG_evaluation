@@ -14,6 +14,7 @@ class EvaluationMetric(str, Enum):
     COMPLETENESS = "Completeness"
     INSTRUCTION_ADHERENCE = "Instruction Adherence"
     CONTEXT_RELEVANCE = "Context Relevance"
+    CONCISENESS_AND_RELEVANCE = "conciseness and relevance"
 
 
 class MetricDescription(str, Enum):
@@ -57,6 +58,21 @@ class MetricDescription(str, Enum):
         "Note: This metric helps uncover hallucinations where the model is ignoring instructions. A high score (close to 1) indicates the model likely followed its instructions.\n"
     )
 
+<<<<<<< HEAD
+=======
+    CONCISENESS_AND_RELEVANCE_DESC = (
+        "Task: Evaluate if the answer includes only information relevant to the question, without adding unnecessary details from the context.\n"
+        "Steps:\n"
+        "1. Carefully read the user's question and the provided answer.\n"
+        "2. Identify the main points and requirements of the question.\n"
+        "3. Check if each piece of information in the answer directly addresses the question or is necessary for a complete understanding.\n"
+        "4. Identify any information from the context that is included in the answer but not relevant to the specific question asked.\n"
+        "5. If the answer contains only relevant information and does not include unnecessary details from the context, evaluate as 'passed'.\n"
+        "6. If the answer includes irrelevant information or unnecessary details from the context, even if factually correct, evaluate as 'failed'.\n"
+        "Note: This metric helps ensure the model's response is focused, on-topic, and concise. A high score (close to 1) indicates the answer is relevant to the question asked without including extraneous information.\n"
+    )
+
+>>>>>>> a441a20 (added the conciseness and relevance metric)
 
 class MetricDetails(BaseModel):
     metric: EvaluationMetric
@@ -286,8 +302,8 @@ def evaluate_all_metrics(user_question: str, context: str, answer: str, human_an
         MetricDetails(metric=EvaluationMetric.CONTEXT_ADHERENCE, description=MetricDescription.CONTEXT_ADHERENCE_DESC),
         MetricDetails(metric=EvaluationMetric.CORRECTNESS, description=MetricDescription.CORRECTNESS_DESC),
         MetricDetails(metric=EvaluationMetric.COMPLETENESS, description=MetricDescription.COMPLETENESS_DESC),
-        MetricDetails(metric=EvaluationMetric.INSTRUCTION_ADHERENCE,
-                      description=MetricDescription.INSTRUCTION_ADHERENCE_DESC)
+        MetricDetails(metric=EvaluationMetric.INSTRUCTION_ADHERENCE, description=MetricDescription.INSTRUCTION_ADHERENCE_DESC),
+        MetricDetails(metric=EvaluationMetric.CONCISENESS_AND_RELEVANCE, description=MetricDescription.CONCISENESS_AND_RELEVANCE_DESC)
     ]
 
     try:
