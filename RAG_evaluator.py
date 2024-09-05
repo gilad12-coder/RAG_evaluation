@@ -109,23 +109,53 @@ class EvalParser(dspy.Signature):
 
 
 class RAGEval(dspy.Module):
-    """Module for RAG evaluation."""
+    """
+    Module for RAG (Retrieval-Augmented Generation) evaluation.
+
+    This class provides methods to evaluate RAG outputs based on various metrics,
+    including correctness, instruction adherence, and chunk-level analysis.
+    """
 
     def __init__(self):
+        """
+        Initialize the RAGEval module with different evaluation strategies.
+        """
         super().__init__()
+        logger.info("Initializing RAGEval module")
         self.generate_eval = dspy.TypedChainOfThought(RAGEvaluator)
         self.generate_eval_with_human_answer = dspy.TypedChainOfThought(RAGEvaluatorWithHumanAnswer)
         self.generate_eval_with_system_prompt = dspy.TypedChainOfThought(RAGEvaluatorWithSystemPrompt)
         self.generate_chunk_level_eval = dspy.TypedChainOfThought(ChunkAnalysis)
         self.format_eval = dspy.ChainOfThought(EvalParser)
+        logger.debug("RAGEval module initialized successfully")
 
     def forward(self, user_question: str, context: List[str], answer: str, metric: MetricDetails,
                 human_answer: Optional[str] = None, system_prompt: Optional[str] = None) -> dspy.Prediction:
-        """Perform the forward pass of the RAG evaluation."""
-        logger.debug(f"Evaluating metric: {metric.metric}")
+        """
+        Perform the forward pass of the RAG evaluation.
+
+        Args:
+            user_question (str): The original question asked by the user.
+            context (List[str]): The context provided for answering the question.
+            answer (str): The generated answer to evaluate.
+            metric (MetricDetails): Details of the evaluation metric to be used.
+            human_answer (Optional[str]): The human-generated answer, if available.
+            system_prompt (Optional[str]): The system prompt used for generation, if available.
+
+        Returns:
+            Prediction: A dspy.Prediction object containing the final judgment as a boolean.
+
+        Raises:
+            ValueError: If an unsupported evaluation metric is provided.
+        """
+        logger.info(f"Starting evaluation for metric: {metric.metric}")
+        logger.debug(f"User question: {user_question}")
+        logger.debug(f"Answer to evaluate: {answer}")
+        logger.debug(f"Metric details: {metric}")
 
         # Choose the appropriate evaluation method based on the metric and available inputs
         if metric.metric == EvaluationMetric.CORRECTNESS and human_answer:
+            logger.info("Using evaluation with human answer")
             eval_result = self.generate_eval_with_human_answer(
                 user_question=user_question,
                 context=context,
@@ -134,6 +164,7 @@ class RAGEval(dspy.Module):
                 human_answer=human_answer
             ).evaluation_result
         elif metric.metric == EvaluationMetric.INSTRUCTION_ADHERENCE and system_prompt:
+            logger.info("Using evaluation with system prompt")
             eval_result = self.generate_eval_with_system_prompt(
                 system_prompt=system_prompt,
                 user_question=user_question,
@@ -142,6 +173,7 @@ class RAGEval(dspy.Module):
                 metric=metric
             ).evaluation_result
         else:
+            logger.info(f"Using standard evaluation for {metric.metric}")
             eval_result = self.generate_eval(
                 user_question=user_question,
                 context=context,
@@ -149,19 +181,21 @@ class RAGEval(dspy.Module):
                 metric=metric
             ).evaluation_result
 
-        logger.debug(f"Evaluation result: {eval_result}")
+        logger.debug(f"Raw evaluation result: {eval_result}")
 
         # Format the evaluation result
+        logger.info("Formatting evaluation result")
         model = dspy.OpenAI(temperature=0.0)
         dspy.settings.configure(lm=model)
         formatted_eval_result = self.format_eval(models_output=str(eval_result)).formatted_output
         final_judgment = bool(strtobool(formatted_eval_result))
-        logger.debug(f"Formatted evaluation result: {final_judgment}")
+        logger.info(f"Final judgment: {final_judgment}")
 
         return dspy.Prediction(final_judgment=final_judgment)
 
 
-def evaluate_responses(user_question: str, context: str, answer: str, metrics: List[MetricDetails],
+def evaluate_responses(user_question: str, context: str, answer: str, human_answer: str, system_prompt: str,
+                       metrics: List[MetricDetails],
                        num_evaluations: int = 5) -> Dict[str, Any]:
     """Evaluate responses for all metrics with varying temperatures, considering majority-vote attribution."""
 
@@ -205,7 +239,7 @@ def evaluate_responses(user_question: str, context: str, answer: str, metrics: L
 
         # Evaluate each metric using the same chunk-level evaluation
         for metric in metrics:
-            result = evaluator(user_question, chunks, answer, metric).final_judgment
+            result = evaluator(user_question, chunks, answer, metric, human_answer, system_prompt).final_judgment
             results[metric.metric.value].append(result)
             logger.debug(f"Evaluation {i + 1} result for {metric.metric.value}: {result}")
 
@@ -243,7 +277,9 @@ def evaluate_responses(user_question: str, context: str, answer: str, metrics: L
     return combined_results
 
 
-def evaluate_all_metrics(user_question: str, context: str, answer: str, num_evaluations: int = 5) -> Dict[str, Any]:
+def evaluate_all_metrics(user_question: str, context: str, answer: str, human_answer: str, system_prompt: str,
+                         num_evaluations: int = 5) -> \
+        Dict[str, Any]:
     """Evaluate all metrics for a given question, context, and answer with varying temperatures."""
     logger.info("Starting evaluation of all metrics")
     metrics = [
@@ -251,13 +287,13 @@ def evaluate_all_metrics(user_question: str, context: str, answer: str, num_eval
         MetricDetails(metric=EvaluationMetric.CORRECTNESS, description=MetricDescription.CORRECTNESS_DESC),
         MetricDetails(metric=EvaluationMetric.COMPLETENESS, description=MetricDescription.COMPLETENESS_DESC),
         MetricDetails(metric=EvaluationMetric.INSTRUCTION_ADHERENCE,
-                      description=MetricDescription.INSTRUCTION_ADHERENCE_DESC),
-        MetricDetails(metric=EvaluationMetric.CONTEXT_RELEVANCE, description=MetricDescription.CONTEXT_RELEVANCE_DESC),
+                      description=MetricDescription.INSTRUCTION_ADHERENCE_DESC)
     ]
 
     try:
         # Call the evaluate_responses function to get scores and attribution
-        scores = evaluate_responses(user_question, context, answer, metrics, num_evaluations)
+        scores = evaluate_responses(user_question, context, answer, human_answer, system_prompt, metrics,
+                                    num_evaluations)
 
     except Exception as e:
         logger.error(f"Error evaluating metrics: {str(e)}")
